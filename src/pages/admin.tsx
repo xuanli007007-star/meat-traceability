@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { cx } from '@/lib/cx';
+import styles from '@/styles/layout.module.css';
 import { useRouter } from 'next/router';
-import '@/styles/globals.css';
 
 type Profile = { id:string; role:'admin'|'worker'; org_id:string };
 type EventRow = {
@@ -16,6 +17,12 @@ export default function Admin() {
   const [recent, setRecent] = useState<EventRow[]>([]);
   const [traceQR, setTraceQR] = useState('');
   const [traceRows, setTraceRows] = useState<EventRow[]>([]);
+  const stepClass: Record<EventRow['step'], string> = {
+    INBOUND_WEIGHT: styles.in,
+    CUTTING: styles.cut,
+    PACK: styles.pack,
+    OUTBOUND: styles.out
+  };
 
   useEffect(() => {
     (async () => {
@@ -60,33 +67,45 @@ export default function Admin() {
     a.href=url; a.download=`export_${todayISO()}.csv`; a.click(); URL.revokeObjectURL(url);
   }
 
-  if (!profile) return <div className="center" style={{height:'60vh'}}>加载中…</div>;
+  if (!profile) return <div className={styles.center} style={{height:'60vh'}}>加载中…</div>;
 
   return (
-    <div className="wrap">
-      <header className="hdr">
+    <div className={styles.wrap}>
+      <header className={styles.hdr}>
         <h1>Othermine（管理员） <small>组织：{profile.org_id}</small></h1>
       </header>
 
-      <main className="grid">
+      <main className={styles.grid}>
         {/* 今日统计 */}
-        <section className="card">
+        <section className={styles.card}>
           <h2>📊 今日统计</h2>
-          <div className="stats">
-            <div className="stat"><div className="muted">今日记录</div><div className="big">{recent.length}</div></div>
-            <div className="stat"><div className="muted">入库称重</div><div className="big">{stat('INBOUND_WEIGHT')}</div></div>
-            <div className="stat"><div className="muted">分割</div><div className="big">{stat('CUTTING')}</div></div>
-            <div className="stat"><div className="muted">包装</div><div className="big">{stat('PACK')}</div></div>
+          <div className={styles.stats}>
+            <div className={styles.stat}>
+              <div className={styles.muted}>今日记录</div>
+              <div className={styles.big}>{recent.length}</div>
+            </div>
+            <div className={styles.stat}>
+              <div className={styles.muted}>入库称重</div>
+              <div className={styles.big}>{stat('INBOUND_WEIGHT')}</div>
+            </div>
+            <div className={styles.stat}>
+              <div className={styles.muted}>分割</div>
+              <div className={styles.big}>{stat('CUTTING')}</div>
+            </div>
+            <div className={styles.stat}>
+              <div className={styles.muted}>包装</div>
+              <div className={styles.big}>{stat('PACK')}</div>
+            </div>
           </div>
-          <div className="row" style={{marginTop:10}}>
-            <button className="btn" onClick={()=>exportCSV(recent)}>导出今日CSV</button>
+          <div className={styles.row} style={{marginTop:10}}>
+            <button className={styles.btn} onClick={()=>exportCSV(recent)}>导出今日CSV</button>
           </div>
         </section>
 
         {/* 最近记录 */}
-        <section className="card">
+        <section className={styles.card}>
           <h2>🧾 最近记录（今日）</h2>
-          <table className="table">
+          <table className={styles.table}>
             <thead><tr><th>时间</th><th>操作员</th><th>步骤</th><th>原厂码</th><th>重量(kg)</th><th>备注</th></tr></thead>
             <tbody>
               {recent.map(r=>(
@@ -94,9 +113,7 @@ export default function Admin() {
                   <td>{new Date(r.created_at).toLocaleString()}</td>
                   <td>{r.operator}</td>
                   <td>
-                    <span className={`pill ${
-                      r.step==='INBOUND_WEIGHT'?'in': r.step==='CUTTING'?'cut': r.step==='PACK'?'pack':'out'
-                    }`}>
+                    <span className={cx(styles.pill, stepClass[r.step])}>
                       {r.step==='INBOUND_WEIGHT'?'入库称重': r.step==='CUTTING'?'分割': r.step==='PACK'?'包装':'出库'}
                     </span>
                   </td>
@@ -110,25 +127,23 @@ export default function Admin() {
         </section>
 
         {/* 追溯查询 */}
-        <section className="card">
+        <section className={styles.card}>
           <h2>🔍 追溯查询</h2>
-          <div className="row">
+          <div className={styles.row}>
             <input value={traceQR} onChange={e=>setTraceQR(e.target.value)} placeholder="输入/扫码原厂码"/>
-            <button className="btn" onClick={onTrace}>查询</button>
+            <button className={styles.btn} onClick={onTrace}>查询</button>
           </div>
-          <table className="table" style={{marginTop:10}}>
+          <table className={styles.table} style={{marginTop:10}}>
             <thead><tr><th>时间</th><th>操作员</th><th>步骤</th><th>重量(kg)</th><th>备注</th></tr></thead>
             <tbody>
               {traceRows.length===0
-                ? <tr><td colSpan={5} className="muted">未找到记录</td></tr>
+                ? <tr><td colSpan={5} className={styles.muted}>未找到记录</td></tr>
                 : traceRows.map(r=>(
                   <tr key={r.id}>
                     <td>{new Date(r.created_at).toLocaleString()}</td>
                     <td>{r.operator}</td>
                     <td>
-                      <span className={`pill ${
-                        r.step==='INBOUND_WEIGHT'?'in': r.step==='CUTTING'?'cut': r.step==='PACK'?'pack':'out'
-                      }`}>
+                      <span className={cx(styles.pill, stepClass[r.step])}>
                         {r.step==='INBOUND_WEIGHT'?'入库称重': r.step==='CUTTING'?'分割': r.step==='PACK'?'包装':'出库'}
                       </span>
                     </td>
