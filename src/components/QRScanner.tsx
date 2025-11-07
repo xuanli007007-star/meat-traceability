@@ -28,11 +28,22 @@ type ScannerModule = {
 
 let loaderPromise: Promise<ScannerModule> | null = null;
 
+type BarcodeDetectorDetection = { rawValue: string; format?: string };
+
+type BarcodeDetectorInstance = {
+  detect(source: CanvasImageSource | Blob | ImageData): Promise<BarcodeDetectorDetection[]>;
+};
+
+type BarcodeDetectorConstructor = {
+  new (options?: { formats?: string[] }): BarcodeDetectorInstance;
+  getSupportedFormats(): Promise<string[]>;
+};
+
 class NativeBarcodeScanner implements Html5QrcodeInstance {
   private host: HTMLElement;
   private video: HTMLVideoElement;
   private stream: MediaStream | null = null;
-  private detector: BarcodeDetector | null = null;
+  private detector: BarcodeDetectorInstance | null = null;
   private running = false;
   private frameRequest: number | null = null;
   private detectionErrorNotified = false;
@@ -96,7 +107,11 @@ class NativeBarcodeScanner implements Html5QrcodeInstance {
     if (!('mediaDevices' in navigator) || !navigator.mediaDevices?.getUserMedia) {
       throw new Error('当前浏览器不支持摄像头调用');
     }
-    if (!('BarcodeDetector' in window)) {
+    const barcodeDetectorCtor = (window as Window & {
+      BarcodeDetector?: BarcodeDetectorConstructor;
+    }).BarcodeDetector;
+
+    if (!barcodeDetectorCtor) {
       throw new Error('当前浏览器不支持原生扫码，请升级浏览器或改用 Chrome/Edge 最新版');
     }
 
@@ -131,7 +146,7 @@ class NativeBarcodeScanner implements Html5QrcodeInstance {
     await this.video.play().catch(() => undefined);
 
     try {
-      this.detector = new BarcodeDetector({ formats: ['qr_code'] });
+      this.detector = new barcodeDetectorCtor({ formats: ['qr_code'] });
     } catch (error) {
       await this.stop();
       const message =
