@@ -40,6 +40,12 @@ export default function Worker() {
   const [weight, setWeight] = useState('');
   const [note, setNote] = useState('');
   const qrRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream|null>(null);
+  const frameRef = useRef<number>();
+  const [canScan, setCanScan] = useState(false);
+  const [scanActive, setScanActive] = useState(false);
+  const [scanError, setScanError] = useState<string|null>(null);
 
   useEffect(() => {
     (async () => {
@@ -56,6 +62,17 @@ export default function Worker() {
   }, [router]);
 
   useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const detector = (window as any).BarcodeDetector;
+    const hasMedia = typeof navigator !== 'undefined'
+      && !!navigator.mediaDevices
+      && typeof navigator.mediaDevices.getUserMedia === 'function';
+    if (detector && hasMedia) {
+      setCanScan(true);
+    }
+  }, []);
+
+  useEffect(() => {
     if (stage !== 'TRADE' && !trade) {
       setStage('TRADE');
     }
@@ -67,6 +84,96 @@ export default function Worker() {
     }
   }, [stage, operator]);
 
+  useEffect(() => {
+    if (stage !== 'FORM' && scanActive) {
+      setScanActive(false);
+    }
+  }, [stage, scanActive]);
+
+  useEffect(() => {
+    return () => {
+      stopScanner();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!scanActive) {
+      stopScanner();
+      return;
+    }
+    if (!canScan) {
+      setScanError('当前设备或浏览器不支持摄像头扫码');
+      setScanActive(false);
+      return;
+    }
+    startScanner();
+  }, [scanActive, canScan]);
+
+  async function startScanner() {
+    setScanError(null);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      if (!videoRef.current) {
+        stream.getTracks().forEach(track => track.stop());
+        return;
+      }
+      streamRef.current = stream;
+      videoRef.current.srcObject = stream;
+      await videoRef.current.play();
+      runDetection();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '无法访问摄像头';
+      setScanError(message);
+      setScanActive(false);
+      stopScanner();
+    }
+  }
+
+  function stopScanner() {
+    if (frameRef.current) {
+      cancelAnimationFrame(frameRef.current);
+      frameRef.current = undefined;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
+    }
+  }
+
+  function runDetection() {
+    const detectorCtor = typeof window !== 'undefined' ? (window as any).BarcodeDetector : undefined;
+    if (!detectorCtor || !videoRef.current) return;
+    const detector = new detectorCtor({ formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8'] });
+
+    const detectLoop = async () => {
+      if (!videoRef.current || !scanActive) return;
+      if (videoRef.current.readyState < 2) {
+        frameRef.current = requestAnimationFrame(detectLoop);
+        return;
+      }
+      try {
+        const codes = await detector.detect(videoRef.current);
+        if (codes.length > 0) {
+          const value = codes[0].rawValue?.trim();
+          if (value) {
+            setQr(value);
+            setScanActive(false);
+            setTimeout(() => qrRef.current?.focus(), 0);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn('Barcode detect error', err);
+      }
+      frameRef.current = requestAnimationFrame(detectLoop);
+    };
+
+    frameRef.current = requestAnimationFrame(detectLoop);
+  }
+
   function onLoginOperator() {
     const op = opManual.trim() || operator.trim();
     if (!op) { alert('请选择或输入操作员'); return; }
@@ -74,6 +181,7 @@ export default function Worker() {
     setOperator(op);
     setOpManual('');
     qrRef.current?.focus();
+    setScanActive(false);
     setStage('FORM');
   }
 
@@ -178,6 +286,34 @@ export default function Worker() {
                 <input ref={qrRef} value={qr} onChange={e=>setQr(e.target.value)}
                        placeholder="例：CH-20251107A-001（扫码回车）"
                        onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); onSave(); }}}/>
+                <div className={styles.scanner}>
+                  <div className={styles.scanToolbar}>
+                    <button
+                      type="button"
+                      className={cx(styles.btn, scanActive && styles.primary)}
+                      onClick={()=>setScanActive(prev => !prev)}
+                      disabled={!canScan}
+                    >
+                      {scanActive ? '停止摄像头扫码' : '启动摄像头扫码'}
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.btn}
+                      onClick={()=>{ setQr(''); setScanActive(false); setScanError(null); qrRef.current?.focus(); }}
+                    >
+                      清除扫码结果
+                    </button>
+                  </div>
+                  {scanError ? (
+                    <p className={styles.scanError}>{scanError}</p>
+                  ) : scanActive ? (
+                    <video ref={videoRef} className={styles.scanVideo} muted playsInline />
+                  ) : (
+                    <p className={styles.scanTip}>
+                      {canScan ? '点击“启动摄像头扫码”启用后置摄像头读取二维码，也可直接手动输入。' : '当前浏览器不支持摄像头扫码，请改用手动输入原厂码。'}
+                    </p>
+                  )}
+                </div>
               </div>
               <div>
                 <label>重量（kg）<span className={styles.muted}>{trade==='INBOUND_WEIGHT' ? '（必填）' : '（可空）'}</span></label>
