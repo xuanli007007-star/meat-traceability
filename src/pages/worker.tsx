@@ -1,27 +1,11 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
-
-type Html5QrcodeInstance = {
-  start(
-    cameraConfig: any,
-    config: { fps?: number; qrbox?: number | { width: number; height: number } },
-    onSuccess: (decodedText: string) => void,
-    onError?: (err: string) => void
-  ): Promise<void>;
-  stop(): Promise<void>;
-  clear(): Promise<void>;
-};
-
-type Html5QrcodeCtor = new (elementId: string, config?: { verbose?: boolean }) => Html5QrcodeInstance;
-
-declare global {
-  interface Window {
-    Html5Qrcode?: Html5QrcodeCtor;
-  }
-}
+import React, { useEffect, useRef, useState } from 'react';
+import dynamic from 'next/dynamic';
+import { useRouter } from 'next/router';
 import { supabase } from '@/lib/supabase';
 import { cx } from '@/lib/cx';
 import styles from '@/styles/layout.module.css';
-import { useRouter } from 'next/router';
+
+const QRScanner = dynamic(() => import('@/components/QRScanner'), { ssr: false });
 
 type Profile = { id:string; role:'admin'|'worker'; org_id:string };
 type StepId = 'INBOUND_WEIGHT'|'CUTTING'|'PACK'|'OUTBOUND';
@@ -59,17 +43,10 @@ export default function Worker() {
   const [weight, setWeight] = useState('');
   const [note, setNote] = useState('');
   const qrRef = useRef<HTMLInputElement>(null);
-  const videoRef = useRef<HTMLVideoElement>(null);
-  const streamRef = useRef<MediaStream|null>(null);
-  const frameRef = useRef<number>();
-  const [canScan, setCanScan] = useState(false);
-  const [scannerMode, setScannerMode] = useState<'BARCODE' | 'HTML5_QRCODE' | null>(null);
-  const [scanActive, setScanActive] = useState(false);
-  const [scanError, setScanError] = useState<string|null>(null);
-  const html5QrRef = useRef<Html5QrcodeInstance | null>(null);
-  const html5QrPromiseRef = useRef<Promise<Html5QrcodeCtor> | null>(null);
-  const html5ContainerId = useMemo(() => `qr-fallback-${Math.random().toString(36).slice(2)}`, []);
-  const html5ContainerRef = useRef<HTMLDivElement|null>(null);
+  const [scanOpen, setScanOpen] = useState(false);
+  const [cameraSupported, setCameraSupported] = useState(false);
+  const [scanSupportChecked, setScanSupportChecked] = useState(false);
+  const [scanError, setScanError] = useState<string | null>(null);
   
   useEffect(() => {
     (async () => {
@@ -87,21 +64,12 @@ export default function Worker() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const detector = (window as any).BarcodeDetector;
     const hasMedia = typeof navigator !== 'undefined'
       && !!navigator.mediaDevices
       && typeof navigator.mediaDevices.getUserMedia === 'function';
-    if (detector && hasMedia) {
-      setCanScan(true);
-      setScannerMode('BARCODE');
-      return;
-    }
-    if (hasMedia) {
-      setCanScan(true);
-      setScannerMode('HTML5_QRCODE');
-      return;
-    }
-    setScannerMode(null);
+    setCameraSupported(hasMedia);
+    setScanSupportChecked(true);
+    setScanError(hasMedia ? null : '当前浏览器不支持摄像头扫码，请改用手动输入原厂码。');
   }, []);
 
   useEffect(() => {
@@ -117,164 +85,35 @@ export default function Worker() {
   }, [stage, operator]);
 
   useEffect(() => {
-    if (stage !== 'FORM' && scanActive) {
-      setScanActive(false);
+    if (stage !== 'FORM') {
+      setScanOpen(false);
     }
-  }, [stage, scanActive]);
+  }, [stage]);
 
-  useEffect(() => {
-    return () => {
-      stopScanner();
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!scanActive) {
-      stopScanner();
+  const handleOpenScanner = () => {
+    if (!cameraSupported) {
+      setScanError('当前浏览器不支持摄像头扫码，请改用手动输入原厂码。');
       return;
     }
-    if (!canScan) {
-      setScanError('当前设备或浏览器不支持摄像头扫码');
-      setScanActive(false);
-      return;
-    }
-    startScanner();
-  }, [scanActive, canScan, scannerMode]);
-
-  async function startScanner() {
     setScanError(null);
-    try {
-      if (scannerMode === 'BARCODE') {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
-        if (!videoRef.current) {
-          stream.getTracks().forEach(track => track.stop());
-          return;
-        }
-        streamRef.current = stream;
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-        runDetection();
-        return;
-      }
+    setScanOpen(true);
+  };
 
-      if (scannerMode === 'HTML5_QRCODE') {
-        if (!html5ContainerRef.current) {
-          throw new Error('缺少扫码渲染容器');
-        }
-        html5ContainerRef.current.innerHTML = '';
-        const Html5Qrcode = await loadHtml5Qrcode();
-        const html5Qr = new Html5Qrcode(html5ContainerId, { verbose: false });
-        html5QrRef.current = html5Qr;
-        await html5Qr.start(
-          { facingMode: { ideal: 'environment' } },
-          { fps: 8, qrbox: { width: 240, height: 240 } },
-          (decodedText: string) => {
-            const value = decodedText?.trim();
-            if (value) {
-              setQr(value);
-              setScanActive(false);
-              setTimeout(() => qrRef.current?.focus(), 0);
-            }
-          },
-          () => {
-            // 连续扫描下会频繁抛出 not found 错误，这里忽略即可
-          }
-        );
-        return;
-      }
+  const handleScanDetected = (value: string) => {
+    setQr(value);
+    setScanOpen(false);
+    setScanError(null);
+    setTimeout(() => qrRef.current?.focus(), 0);
+  };
 
-      throw new Error('未检测到可用的扫码方式');
-    } catch (err) {
-      const message = err instanceof Error ? err.message : '无法访问摄像头';
-      setScanError(message);
-      setScanActive(false);
-      stopScanner();
-    }
-  }
+  const handleScanClose = () => {
+    setScanOpen(false);
+    setTimeout(() => qrRef.current?.focus(), 0);
+  };
 
-  function stopScanner() {
-    if (frameRef.current) {
-      cancelAnimationFrame(frameRef.current);
-      frameRef.current = undefined;
-    }
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach(track => track.stop());
-      streamRef.current = null;
-    }
-    if (videoRef.current) {
-      videoRef.current.srcObject = null;
-    }
-    if (html5QrRef.current) {
-      html5QrRef.current
-        .stop()
-        .catch(() => undefined)
-        .then(() => html5QrRef.current?.clear().catch(() => undefined))
-        .finally(() => {
-          html5QrRef.current = null;
-        });
-    }
-  }
-
-  function runDetection() {
-    const detectorCtor = typeof window !== 'undefined' ? (window as any).BarcodeDetector : undefined;
-    if (!detectorCtor || !videoRef.current) return;
-    const detector = new detectorCtor({ formats: ['qr_code', 'code_128', 'code_39', 'ean_13', 'ean_8'] });
-
-    const detectLoop = async () => {
-      if (!videoRef.current || !scanActive) return;
-      if (videoRef.current.readyState < 2) {
-        frameRef.current = requestAnimationFrame(detectLoop);
-        return;
-      }
-      try {
-        const codes = await detector.detect(videoRef.current);
-        if (codes.length > 0) {
-          const value = codes[0].rawValue?.trim();
-          if (value) {
-            setQr(value);
-            setScanActive(false);
-            setTimeout(() => qrRef.current?.focus(), 0);
-            return;
-          }
-        }
-      } catch (err) {
-        console.warn('Barcode detect error', err);
-      }
-      frameRef.current = requestAnimationFrame(detectLoop);
-    };
-
-    frameRef.current = requestAnimationFrame(detectLoop);
-  }
-
-  function loadHtml5Qrcode(): Promise<Html5QrcodeCtor> {
-    if (typeof window === 'undefined') {
-      return Promise.reject(new Error('仅客户端可加载扫码库'));
-    }
-    if (window.Html5Qrcode) {
-      return Promise.resolve(window.Html5Qrcode);
-    }
-    if (!html5QrPromiseRef.current) {
-      html5QrPromiseRef.current = new Promise((resolve, reject) => {
-        const script = document.createElement('script');
-        script.src = 'https://unpkg.com/html5-qrcode@2.3.10/minified/html5-qrcode.min.js';
-        script.async = true;
-        script.onload = () => {
-          if (window.Html5Qrcode) {
-            resolve(window.Html5Qrcode);
-          } else {
-            html5QrPromiseRef.current = null;
-            reject(new Error('扫码库加载失败'));
-          }
-        };
-        script.onerror = () => {
-          html5QrPromiseRef.current = null;
-          reject(new Error('无法加载扫码库'));
-        };
-        document.body.appendChild(script);
-      });
-    }
-    return html5QrPromiseRef.current;
-  }
+  const handleScanError = (message: string) => {
+    setScanError(`摄像头启动失败：${message}`);
+  };
 
   function onLoginOperator() {
     const op = opManual.trim() || operator.trim();
@@ -283,7 +122,8 @@ export default function Worker() {
     setOperator(op);
     setOpManual('');
     qrRef.current?.focus();
-    setScanActive(false);
+    setScanOpen(false);
+    setScanError(null);
     setStage('FORM');
   }
 
@@ -385,57 +225,43 @@ export default function Worker() {
             <div className={styles.row}>
               <div>
                 <label>原厂二维码（扫码或粘贴）</label>
-                <input ref={qrRef} value={qr} onChange={e=>setQr(e.target.value)}
-                       placeholder="例：CH-20251107A-001（扫码回车）"
-                       onKeyDown={e=>{ if(e.key==='Enter'){ e.preventDefault(); onSave(); }}}/>
-                <div className={styles.scanner}>
-                  <div className={styles.scanToolbar}>
-                    <button
-                      type="button"
-                      className={cx(styles.btn, scanActive && styles.primary)}
-                      onClick={()=>setScanActive(prev => !prev)}
-                      disabled={!canScan}
-                    >
-                      {scanActive ? '停止摄像头扫码' : '启动摄像头扫码'}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.btn}
-                      onClick={()=>{ setQr(''); setScanActive(false); setScanError(null); qrRef.current?.focus(); }}
-                    >
-                      清除扫码结果
-                    </button>
-                  </div>
-                  {scanError ? (
-                    <p className={styles.scanError}>{scanError}</p>
-                  ) : (
-                    <div className={styles.scanViewport}>
-                      <video
-                        ref={videoRef}
-                        className={styles.scanVideo}
-                        muted
-                        playsInline
-                        autoPlay
-                        style={{ display: scanActive && scannerMode === 'BARCODE' ? 'block' : 'none' }}
-                      />
-                      <div
-                        ref={html5ContainerRef}
-                        id={html5ContainerId}
-                        className={styles.scanVideo}
-                        style={{ display: scanActive && scannerMode === 'HTML5_QRCODE' ? 'block' : 'none' }}
-                      />
-                      {!scanActive && (
-                        <p className={styles.scanTip}>
-                          {canScan
-                            ? scannerMode === 'HTML5_QRCODE'
-                              ? '点击“启动摄像头扫码”后系统会加载兼容性更好的扫码模块，亦可手动输入。'
-                              : '点击“启动摄像头扫码”启用后置摄像头读取二维码，也可直接手动输入。'
-                            : '当前浏览器不支持摄像头扫码，请改用手动输入原厂码。'}
-                        </p>
-                      )}
-                    </div>
-                  )}
+                <input
+                  ref={qrRef}
+                  value={qr}
+                  onChange={e => setQr(e.target.value)}
+                  placeholder="例：CH-20251107A-001（扫码回车）"
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      onSave();
+                    }
+                  }}
+                />
+                <div className={styles.scanActions}>
+                  <button type="button" className={cx(styles.btn, styles.primary)} onClick={handleOpenScanner}>
+                    📷 打开摄像头扫码
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.btn}
+                    onClick={() => {
+                      setQr('');
+                      setScanError(null);
+                      qrRef.current?.focus();
+                    }}
+                  >
+                    清除扫码结果
+                  </button>
                 </div>
+                {scanError ? (
+                  <p className={styles.scanError}>{scanError}</p>
+                ) : scanSupportChecked ? (
+                  <p className={styles.hint}>
+                    {cameraSupported
+                      ? '点击“打开摄像头扫码”即可调起后置摄像头，也可直接粘贴或使用扫码枪输入。'
+                      : '当前浏览器不支持摄像头扫码，请改用手动输入原厂码。'}
+                  </p>
+                ) : null}
               </div>
               <div>
                 <label>重量（kg）<span className={styles.muted}>{trade==='INBOUND_WEIGHT' ? '（必填）' : '（可空）'}</span></label>
@@ -463,6 +289,9 @@ export default function Worker() {
           </section>
         )}
       </main>
+      {scanOpen && (
+        <QRScanner onDetected={handleScanDetected} onClose={handleScanClose} onError={handleScanError} />
+      )}
     </div>
   );
 }
