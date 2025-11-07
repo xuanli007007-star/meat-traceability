@@ -1,4 +1,3 @@
-// src/pages/login.tsx
 import { useEffect, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useRouter } from 'next/router';
@@ -12,7 +11,6 @@ export default function Login() {
   const [msg, setMsg] = useState<string | null>(null);
 
   useEffect(() => {
-    // 已登录就跳回首页
     supabase.auth.getSession().then(({ data }) => {
       if (data.session) router.replace('/');
     });
@@ -20,103 +18,128 @@ export default function Login() {
 
   async function onSignIn() {
     setBusy(true); setMsg(null);
-    const { error } = await supabase.auth.signInWithPassword({
-      email: email.trim(),
-      password
-    });
+    const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
     setBusy(false);
-    if (error) { setMsg(error.message); return; }
-    router.replace('/');
+    if (error) setMsg(error.message);
+    else router.replace('/');
   }
 
   async function onSignUp() {
     setBusy(true); setMsg(null);
-    const { data, error } = await supabase.auth.signUp({
-      email: email.trim(),
-      password
-    });
+    const { error } = await supabase.auth.signUp({ email: email.trim(), password });
     setBusy(false);
-    if (error) { setMsg(error.message); return; }
-    // 成功后可能需要邮箱验证，按你的 Auth 设置而定
-    setMsg('注册成功，请检查邮箱完成验证或直接登录。');
-    setMode('signin');
+    setMsg(error ? error.message : '注册成功，请到邮箱验证后登录。');
+    if (!error) setMode('signin');
   }
 
   async function onReset() {
     setBusy(true); setMsg(null);
     const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-      redirectTo: typeof window !== 'undefined'
-        ? `${window.location.origin}/reset`
-        : undefined
+      redirectTo: `${window.location.origin}/reset`
     });
     setBusy(false);
-    if (error) { setMsg(error.message); return; }
-    setMsg('已发送重置邮件，请查收。');
+    setMsg(error ? error.message : '重置邮件已发送，请查收。');
   }
 
   return (
-    <div style={{maxWidth:380,margin:'10vh auto',padding:24,background:'#12141a',color:'#e6e6e6',borderRadius:12,border:'1px solid #1e222b'}}>
-      <h2 style={{marginTop:0}}>
-        {mode==='signin' ? '账号密码登录'
-         : mode==='signup' ? '注册新账号'
-         : '找回密码'}
-      </h2>
+    <div style={{
+      display:'flex',justifyContent:'center',alignItems:'center',
+      minHeight:'100vh',background:'#f5f6f8'
+    }}>
+      <div style={{
+        width:360,background:'#fff',padding:32,
+        borderRadius:12,boxShadow:'0 4px 20px rgba(0,0,0,0.05)'
+      }}>
+        <h2 style={{marginTop:0,color:'#1e293b'}}>
+          {mode==='signin' ? '账号登录'
+           : mode==='signup' ? '注册新账号'
+           : '找回密码'}
+        </h2>
 
-      <label style={{display:'block',margin:'8px 0 4px',color:'#9aa0a6'}}>邮箱</label>
-      <input
-        placeholder="you@example.com"
-        value={email}
-        onChange={e=>setEmail(e.target.value)}
-        style={{width:'100%',padding:'10px 12px',borderRadius:8,border:'1px solid #2a2f3a',background:'#0f1320',color:'#e6e6e6'}}
-      />
+        <label style={{display:'block',margin:'10px 0 4px',color:'#475569'}}>邮箱</label>
+        <input
+          type="email"
+          value={email}
+          onChange={e=>setEmail(e.target.value)}
+          placeholder="you@example.com"
+          style={{
+            width:'100%',padding:'10px 12px',
+            border:'1px solid #cbd5e1',borderRadius:8,
+            background:'#fff',color:'#1e293b'
+          }}
+        />
 
-      {mode!=='reset' && (
-        <>
-          <label style={{display:'block',margin:'12px 0 4px',color:'#9aa0a6'}}>密码</label>
-          <input
-            type="password"
-            placeholder="••••••••"
-            value={password}
-            onChange={e=>setPassword(e.target.value)}
-            style={{width:'100%',padding:'10px 12px',borderRadius:8,border:'1px solid #2a2f3a',background:'#0f1320',color:'#e6e6e6'}}
-          />
-        </>
-      )}
-
-      {msg && <p style={{marginTop:12,color:'#ffb020'}}>{msg}</p>}
-
-      {mode==='signin' && (
-        <button disabled={busy} onClick={onSignIn}
-          style={{marginTop:12,width:'100%',padding:'10px 12px',borderRadius:8,background:'#1f5a3f',border:'1px solid #297f57',color:'#fff',cursor:'pointer'}}>
-          {busy ? '登录中…' : '登录'}
-        </button>
-      )}
-
-      {mode==='signup' && (
-        <button disabled={busy} onClick={onSignUp}
-          style={{marginTop:12,width:'100%',padding:'10px 12px',borderRadius:8,background:'#1f5a3f',border:'1px solid #297f57',color:'#fff',cursor:'pointer'}}>
-          {busy ? '注册中…' : '注册'}
-        </button>
-      )}
-
-      {mode==='reset' && (
-        <button disabled={busy} onClick={onReset}
-          style={{marginTop:12,width:'100%',padding:'10px 12px',borderRadius:8,background:'#1f5a3f',border:'1px solid #297f57',color:'#fff',cursor:'pointer'}}>
-          {busy ? '发送中…' : '发送重置邮件'}
-        </button>
-      )}
-
-      <div style={{marginTop:12,display:'flex',justifyContent:'space-between',color:'#9aa0a6'}}>
-        {mode!=='signin' ? (
-          <a onClick={()=>setMode('signin')} style={{cursor:'pointer'}}>去登录</a>
-        ) : (
-          <a onClick={()=>setMode('reset')} style={{cursor:'pointer'}}>忘记密码？</a>
+        {mode!=='reset' && (
+          <>
+            <label style={{display:'block',margin:'10px 0 4px',color:'#475569'}}>密码</label>
+            <input
+              type="password"
+              value={password}
+              onChange={e=>setPassword(e.target.value)}
+              placeholder="••••••••"
+              style={{
+                width:'100%',padding:'10px 12px',
+                border:'1px solid #cbd5e1',borderRadius:8,
+                background:'#fff',color:'#1e293b'
+              }}
+            />
+          </>
         )}
-        {mode!=='signup' ? (
-          <a onClick={()=>setMode('signup')} style={{cursor:'pointer'}}>没有账号？注册</a>
-        ) : (
-          <span />
+
+        {msg && <p style={{marginTop:12,color:'#ef4444',fontSize:13}}>{msg}</p>}
+
+        {mode==='signin' && (
+          <button
+            disabled={busy}
+            onClick={onSignIn}
+            style={{
+              width:'100%',marginTop:16,padding:'10px 12px',
+              borderRadius:8,border:'none',
+              background:'#2563eb',color:'#fff',fontSize:15,cursor:'pointer'
+            }}>
+            {busy ? '登录中…' : '登录'}
+          </button>
         )}
+
+        {mode==='signup' && (
+          <button
+            disabled={busy}
+            onClick={onSignUp}
+            style={{
+              width:'100%',marginTop:16,padding:'10px 12px',
+              borderRadius:8,border:'none',
+              background:'#2563eb',color:'#fff',fontSize:15,cursor:'pointer'
+            }}>
+            {busy ? '注册中…' : '注册'}
+          </button>
+        )}
+
+        {mode==='reset' && (
+          <button
+            disabled={busy}
+            onClick={onReset}
+            style={{
+              width:'100%',marginTop:16,padding:'10px 12px',
+              borderRadius:8,border:'none',
+              background:'#2563eb',color:'#fff',fontSize:15,cursor:'pointer'
+            }}>
+            {busy ? '发送中…' : '发送重置邮件'}
+          </button>
+        )}
+
+        <div style={{
+          display:'flex',justifyContent:'space-between',
+          marginTop:14,fontSize:13,color:'#64748b'
+        }}>
+          {mode!=='signin' ? (
+            <a onClick={()=>setMode('signin')} style={{cursor:'pointer',color:'#2563eb'}}>返回登录</a>
+          ) : (
+            <a onClick={()=>setMode('reset')} style={{cursor:'pointer',color:'#2563eb'}}>忘记密码？</a>
+          )}
+          {mode!=='signup' ? (
+            <a onClick={()=>setMode('signup')} style={{cursor:'pointer',color:'#2563eb'}}>注册新账号</a>
+          ) : null}
+        </div>
       </div>
     </div>
   );
