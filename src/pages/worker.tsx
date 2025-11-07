@@ -29,6 +29,25 @@ const TRADES: {id:StepId; name:string}[] = [
   { id:'OUTBOUND',       name:'出库' },
 ];
 
+function detectCameraSupport() {
+  if (typeof navigator === 'undefined') return false;
+  const nav = navigator as Navigator & {
+    mediaDevices?: MediaDevices & {
+      getUserMedia?: MediaDevices['getUserMedia'];
+    };
+    webkitGetUserMedia?: MediaDevices['getUserMedia'];
+    mozGetUserMedia?: MediaDevices['getUserMedia'];
+    getUserMedia?: MediaDevices['getUserMedia'];
+  };
+  if (nav.mediaDevices && typeof nav.mediaDevices.getUserMedia === 'function') {
+    return true;
+  }
+  if (typeof nav.getUserMedia === 'function') return true;
+  if (typeof nav.webkitGetUserMedia === 'function') return true;
+  if (typeof nav.mozGetUserMedia === 'function') return true;
+  return false;
+}
+
 export default function Worker() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile|null>(null);
@@ -47,7 +66,7 @@ export default function Worker() {
   const [cameraSupported, setCameraSupported] = useState(false);
   const [scanSupportChecked, setScanSupportChecked] = useState(false);
   const [scanError, setScanError] = useState<string | null>(null);
-  
+
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
@@ -64,12 +83,9 @@ export default function Worker() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    const hasMedia = typeof navigator !== 'undefined'
-      && !!navigator.mediaDevices
-      && typeof navigator.mediaDevices.getUserMedia === 'function';
-    setCameraSupported(hasMedia);
+    const supported = detectCameraSupport();
+    setCameraSupported(supported);
     setScanSupportChecked(true);
-    setScanError(hasMedia ? null : '当前浏览器不支持摄像头扫码，请改用手动输入原厂码。');
   }, []);
 
   useEffect(() => {
@@ -91,10 +107,6 @@ export default function Worker() {
   }, [stage]);
 
   const handleOpenScanner = () => {
-    if (!cameraSupported) {
-      setScanError('当前浏览器不支持摄像头扫码，请改用手动输入原厂码。');
-      return;
-    }
     setScanError(null);
     setScanOpen(true);
   };
@@ -258,8 +270,8 @@ export default function Worker() {
                 ) : scanSupportChecked ? (
                   <p className={styles.hint}>
                     {cameraSupported
-                      ? '点击“打开摄像头扫码”即可调起后置摄像头，也可直接粘贴或使用扫码枪输入。'
-                      : '当前浏览器不支持摄像头扫码，请改用手动输入原厂码。'}
+                      ? '点击“打开摄像头扫码”授权后置摄像头，也可直接粘贴或使用扫码枪输入。'
+                      : '检测到当前浏览器可能未完全开放摄像头权限，可先点击按钮尝试授权，若仍失败请手动输入原厂码。'}
                   </p>
                 ) : null}
               </div>
