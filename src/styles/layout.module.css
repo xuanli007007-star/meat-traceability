@@ -38,6 +38,7 @@
 .ftr{padding:16px 22px;color:var(--muted)}
 .scanner{margin-top:14px;width:100%;border:1px dashed var(--border);border-radius:14px;padding:14px;display:flex;flex-direction:column;gap:12px;align-items:center;background:#f8fafc}
 .scanToolbar{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+.scanViewport{width:100%;display:flex;flex-direction:column;align-items:center;gap:8px}
 .scanVideo{width:100%;max-width:480px;aspect-ratio:4/3;background:#000;border-radius:12px;overflow:hidden}
 .scanTip{font-size:12px;color:var(--muted);text-align:center}
 .scanError{font-size:12px;color:#dc2626;text-align:center}

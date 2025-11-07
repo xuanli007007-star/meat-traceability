@@ -1,4 +1,23 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+
+type Html5QrcodeInstance = {
+  start(
+    cameraConfig: any,
+    config: { fps?: number; qrbox?: number | { width: number; height: number } },
+    onSuccess: (decodedText: string) => void,
+    onError?: (err: string) => void
+  ): Promise<void>;
+  stop(): Promise<void>;
+  clear(): Promise<void>;
+};
+
+type Html5QrcodeCtor = new (elementId: string, config?: { verbose?: boolean }) => Html5QrcodeInstance;
+
+declare global {
+  interface Window {
+    Html5Qrcode?: Html5QrcodeCtor;
+  }
+}
 import { supabase } from '@/lib/supabase';
 import { cx } from '@/lib/cx';
 import styles from '@/styles/layout.module.css';
@@ -44,9 +63,14 @@ export default function Worker() {
   const streamRef = useRef<MediaStream|null>(null);
   const frameRef = useRef<number>();
   const [canScan, setCanScan] = useState(false);
+  const [scannerMode, setScannerMode] = useState<'BARCODE' | 'HTML5_QRCODE' | null>(null);
   const [scanActive, setScanActive] = useState(false);
   const [scanError, setScanError] = useState<string|null>(null);
-
+  const html5QrRef = useRef<Html5QrcodeInstance | null>(null);
+  const html5QrPromiseRef = useRef<Promise<Html5QrcodeCtor> | null>(null);
+  const html5ContainerId = useMemo(() => `qr-fallback-${Math.random().toString(36).slice(2)}`, []);
+  const html5ContainerRef = useRef<HTMLDivElement|null>(null);
+  
   useEffect(() => {
     (async () => {
       const { data } = await supabase.auth.getSession();
@@ -69,7 +93,15 @@ export default function Worker() {
       && typeof navigator.mediaDevices.getUserMedia === 'function';
     if (detector && hasMedia) {
       setCanScan(true);
+      setScannerMode('BARCODE');
+      return;
     }
+    if (hasMedia) {
+      setCanScan(true);
+      setScannerMode('HTML5_QRCODE');
+      return;
+    }
+    setScannerMode(null);
   }, []);
 
   useEffect(() => {
@@ -107,20 +139,51 @@ export default function Worker() {
       return;
     }
     startScanner();
-  }, [scanActive, canScan]);
+  }, [scanActive, canScan, scannerMode]);
 
   async function startScanner() {
     setScanError(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      if (!videoRef.current) {
-        stream.getTracks().forEach(track => track.stop());
+      if (scannerMode === 'BARCODE') {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' } } });
+        if (!videoRef.current) {
+          stream.getTracks().forEach(track => track.stop());
+          return;
+        }
+        streamRef.current = stream;
+        videoRef.current.srcObject = stream;
+        await videoRef.current.play();
+        runDetection();
         return;
       }
-      streamRef.current = stream;
-      videoRef.current.srcObject = stream;
-      await videoRef.current.play();
-      runDetection();
+
+      if (scannerMode === 'HTML5_QRCODE') {
+        if (!html5ContainerRef.current) {
+          throw new Error('缺少扫码渲染容器');
+        }
+        html5ContainerRef.current.innerHTML = '';
+        const Html5Qrcode = await loadHtml5Qrcode();
+        const html5Qr = new Html5Qrcode(html5ContainerId, { verbose: false });
+        html5QrRef.current = html5Qr;
+        await html5Qr.start(
+          { facingMode: { ideal: 'environment' } },
+          { fps: 8, qrbox: { width: 240, height: 240 } },
+          (decodedText: string) => {
+            const value = decodedText?.trim();
+            if (value) {
+              setQr(value);
+              setScanActive(false);
+              setTimeout(() => qrRef.current?.focus(), 0);
+            }
+          },
+          () => {
+            // 连续扫描下会频繁抛出 not found 错误，这里忽略即可
+          }
+        );
+        return;
+      }
+
+      throw new Error('未检测到可用的扫码方式');
     } catch (err) {
       const message = err instanceof Error ? err.message : '无法访问摄像头';
       setScanError(message);
@@ -140,6 +203,15 @@ export default function Worker() {
     }
     if (videoRef.current) {
       videoRef.current.srcObject = null;
+    }
+    if (html5QrRef.current) {
+      html5QrRef.current
+        .stop()
+        .catch(() => undefined)
+        .then(() => html5QrRef.current?.clear().catch(() => undefined))
+        .finally(() => {
+          html5QrRef.current = null;
+        });
     }
   }
 
@@ -172,6 +244,36 @@ export default function Worker() {
     };
 
     frameRef.current = requestAnimationFrame(detectLoop);
+  }
+
+  function loadHtml5Qrcode(): Promise<Html5QrcodeCtor> {
+    if (typeof window === 'undefined') {
+      return Promise.reject(new Error('仅客户端可加载扫码库'));
+    }
+    if (window.Html5Qrcode) {
+      return Promise.resolve(window.Html5Qrcode);
+    }
+    if (!html5QrPromiseRef.current) {
+      html5QrPromiseRef.current = new Promise((resolve, reject) => {
+        const script = document.createElement('script');
+        script.src = 'https://unpkg.com/html5-qrcode@2.3.10/minified/html5-qrcode.min.js';
+        script.async = true;
+        script.onload = () => {
+          if (window.Html5Qrcode) {
+            resolve(window.Html5Qrcode);
+          } else {
+            html5QrPromiseRef.current = null;
+            reject(new Error('扫码库加载失败'));
+          }
+        };
+        script.onerror = () => {
+          html5QrPromiseRef.current = null;
+          reject(new Error('无法加载扫码库'));
+        };
+        document.body.appendChild(script);
+      });
+    }
+    return html5QrPromiseRef.current;
   }
 
   function onLoginOperator() {
@@ -306,12 +408,32 @@ export default function Worker() {
                   </div>
                   {scanError ? (
                     <p className={styles.scanError}>{scanError}</p>
-                  ) : scanActive ? (
-                    <video ref={videoRef} className={styles.scanVideo} muted playsInline />
                   ) : (
-                    <p className={styles.scanTip}>
-                      {canScan ? '点击“启动摄像头扫码”启用后置摄像头读取二维码，也可直接手动输入。' : '当前浏览器不支持摄像头扫码，请改用手动输入原厂码。'}
-                    </p>
+                    <div className={styles.scanViewport}>
+                      <video
+                        ref={videoRef}
+                        className={styles.scanVideo}
+                        muted
+                        playsInline
+                        autoPlay
+                        style={{ display: scanActive && scannerMode === 'BARCODE' ? 'block' : 'none' }}
+                      />
+                      <div
+                        ref={html5ContainerRef}
+                        id={html5ContainerId}
+                        className={styles.scanVideo}
+                        style={{ display: scanActive && scannerMode === 'HTML5_QRCODE' ? 'block' : 'none' }}
+                      />
+                      {!scanActive && (
+                        <p className={styles.scanTip}>
+                          {canScan
+                            ? scannerMode === 'HTML5_QRCODE'
+                              ? '点击“启动摄像头扫码”后系统会加载兼容性更好的扫码模块，亦可手动输入。'
+                              : '点击“启动摄像头扫码”启用后置摄像头读取二维码，也可直接手动输入。'
+                            : '当前浏览器不支持摄像头扫码，请改用手动输入原厂码。'}
+                        </p>
+                      )}
+                    </div>
                   )}
                 </div>
               </div>
