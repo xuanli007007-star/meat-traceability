@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, ORG_ID } from '@/lib/supabase';
 import { useRouter } from 'next/router';
-import '@/styles/globals.css';
 
 type Role = 'admin'|'worker';
 type Profile = { id: string; role: Role; org_id: string; };
