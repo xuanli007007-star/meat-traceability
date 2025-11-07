@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { supabase, ORG_ID } from '@/lib/supabase';
-import '@/styles/globals.css';
 
 type EventRow = {
   id: number;
