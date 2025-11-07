@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import type { PostgrestError } from '@supabase/supabase-js';
 import { supabase, ORG_ID } from '@/lib/supabase';
 
 type EventRow = {
@@ -30,9 +31,38 @@ export default function Home() {
   const [recent, setRecent] = useState<EventRow[]>([]);
   const [traceQR, setTraceQR] = useState('');
   const [traceRows, setTraceRows] = useState<EventRow[]>([]);
+  const [dbReady, setDbReady] = useState(true);
+  const [dbError, setDbError] = useState('');
   const qrInputRef = useRef<HTMLInputElement>(null);
 
   const mustWeight = useMemo(()=> step==='INBOUND_WEIGHT', [step]);
+
+  const missingTableHelp =
+    'Supabase 尚未创建 public.events 数据表。请在 Supabase SQL Editor 中执行仓库 supabase/events.sql 中的脚本，完成初始化。';
+
+  function isMissingTable(error: PostgrestError | null): boolean {
+    if (!error) return false;
+    return (
+      error.code === '42P01' ||
+      /schema cache/i.test(error.message) ||
+      /relation "?public\.events"? does not exist/i.test(error.message)
+    );
+  }
+
+  function handleDbError(error: PostgrestError | null) {
+    if (!error) {
+      setDbReady(true);
+      setDbError('');
+      return;
+    }
+    if (isMissingTable(error)) {
+      setDbReady(false);
+      setDbError(missingTableHelp);
+      return;
+    }
+    setDbReady(true);
+    setDbError(error.message || '未知错误');
+  }
 
   useEffect(() => {
     const saved = localStorage.getItem('current_operator');
@@ -55,6 +85,7 @@ export default function Home() {
       .gte('created_at', from)
       .lte('created_at', to)
       .order('created_at', { ascending:false });
+    handleDbError(error);
     if (!error && data) setRecent(data as EventRow[]);
   }
 
@@ -89,8 +120,17 @@ export default function Home() {
       weight_kg: w,
       note: note.trim() || null
     };
+    if (!dbReady) {
+      alert(missingTableHelp);
+      return;
+    }
+
     const { error } = await supabase.from('events').insert(payload);
-    if (error) { alert('保存失败：' + error.message); return; }
+    if (error) {
+      handleDbError(error);
+      alert('保存失败：' + (isMissingTable(error) ? missingTableHelp : error.message));
+      return;
+    }
 
     setQr(''); setWeight(''); setNote('');
     qrInputRef.current?.focus();
@@ -100,16 +140,23 @@ export default function Home() {
   async function onTrace() {
     const code = traceQR.trim();
     if (!code) { alert('请输入原厂码'); return; }
+    if (!dbReady) {
+      alert(missingTableHelp);
+      return;
+    }
+
     const { data, error } = await supabase
       .from('events')
       .select('*')
       .eq('org_id', ORG_ID)
       .eq('qr', code)
       .order('created_at', { ascending:true });
+    handleDbError(error);
     if (!error && data) setTraceRows(data as EventRow[]);
   }
 
   function exportCSV(rows: EventRow[]) {
+    if (!dbReady) { alert(missingTableHelp); return; }
     if (!rows.length) { alert('今日暂无数据'); return; }
     const headers = ['id','created_at','operator','step','qr','weight_kg','note'];
     const esc = (v: any) => (v==null?'':String(v).replace(/"/g,'""'));
@@ -135,6 +182,18 @@ export default function Home() {
       </header>
 
       <main className="grid">
+        {!dbReady && (
+          <section className="card warning">
+            <h2>⚠️ 数据库未初始化</h2>
+            <p>{dbError || missingTableHelp}</p>
+            <ol>
+              <li>登录 Supabase 项目后台，进入 SQL Editor。</li>
+              <li>将仓库中的 <code>supabase/events.sql</code> 内容粘贴进去执行。</li>
+              <li>执行成功后刷新此页面即可开始使用。</li>
+            </ol>
+          </section>
+        )}
+
         {/* 登录 */}
         <section className="card">
           <h2>👤 操作员登录</h2>
@@ -186,10 +245,10 @@ export default function Home() {
         <section className="card">
           <h2>📊 今日统计</h2>
           <div className="stats">
-            <div className="stat"><div className="muted">今日记录</div><div className="big">{recent.length}</div></div>
-            <div className="stat"><div className="muted">入库称重</div><div className="big">{statBy('INBOUND_WEIGHT')}</div></div>
-            <div className="stat"><div className="muted">分割</div><div className="big">{statBy('CUTTING')}</div></div>
-            <div className="stat"><div className="muted">包装</div><div className="big">{statBy('PACK')}</div></div>
+            <div className="stat"><div className="muted">今日记录</div><div className="big">{dbReady ? recent.length : '-'}</div></div>
+            <div className="stat"><div className="muted">入库称重</div><div className="big">{dbReady ? statBy('INBOUND_WEIGHT') : '-'}</div></div>
+            <div className="stat"><div className="muted">分割</div><div className="big">{dbReady ? statBy('CUTTING') : '-'}</div></div>
+            <div className="stat"><div className="muted">包装</div><div className="big">{dbReady ? statBy('PACK') : '-'}</div></div>
           </div>
           <div className="row" style={{marginTop:10}}>
             <button className="btn" onClick={()=>exportCSV(recent)}>导出今日CSV</button>
@@ -203,7 +262,7 @@ export default function Home() {
           <table className="table">
             <thead><tr><th>时间</th><th>操作员</th><th>步骤</th><th>原厂码</th><th>重量(kg)</th><th>备注</th></tr></thead>
             <tbody>
-              {recent.map(r => (
+              {dbReady && recent.map(r => (
                 <tr key={r.id}>
                   <td>{new Date(r.created_at).toLocaleString()}</td>
                   <td>{r.operator}</td>
@@ -228,7 +287,9 @@ export default function Home() {
           <table className="table" style={{marginTop:10}}>
             <thead><tr><th>时间</th><th>操作员</th><th>步骤</th><th>重量(kg)</th><th>备注</th></tr></thead>
             <tbody>
-              {traceRows.length===0
+              {!dbReady ? (
+                <tr><td colSpan={5} className="muted">数据库未初始化</td></tr>
+              ) : traceRows.length===0
                 ? <tr><td colSpan={5} className="muted">未找到记录</td></tr>
                 : traceRows.map(r=>(
                   <tr key={r.id}>

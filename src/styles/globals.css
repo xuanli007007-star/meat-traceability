@@ -7,6 +7,10 @@ body{margin:0;background:var(--bg);color:var(--txt);font:14px/1.5,-apple-system,
 .hdr small{color:var(--muted);margin-left:8px}
 .grid{padding:18px;display:grid;grid-template-columns:repeat(2,minmax(320px,1fr));gap:16px}
 .card{background:var(--card);border:1px solid #1e222b;border-radius:14px;padding:14px;box-shadow:0 6px 18px rgba(0,0,0,.15)}
+.card.warning{border-color:#795548;background:#1a1410}
+.card.warning h2{color:#ffb380}
+.card.warning ol{margin:10px 0 0 18px;padding:0}
+.card.warning code{background:#261b12;padding:2px 4px;border-radius:4px;color:#ffcf99}
 .card h2{margin:0 0 10px 0;font-size:16px}
 label{display:block;margin:8px 0 4px;color:var(--muted)}
 input,select,button{width:100%;padding:10px 12px;border-radius:10px;border:1px solid #2a2f3a;background:#0f1320;color:var(--txt);outline:none}
